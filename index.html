@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>XR 3D Data Visualization</title>
+
+<script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+
+<style>
+body { margin:0; overflow:hidden; }
+
+#controls, #legend {
+  position:fixed;
+  left:10px;
+  background:rgba(255,255,255,0.95);
+  padding:12px;
+  border-radius:8px;
+  font-family:Arial;
+  z-index:999;
+  width:220px;
+}
+
+#controls { top:10px; }
+#legend { top:460px; font-size:13px; }
+
+label { font-weight:bold; font-size:14px; }
+select, button, input {
+  width:100%;
+  margin-top:6px;
+  margin-bottom:10px;
+}
+
+.legend-row {
+  display:flex;
+  align-items:center;
+  margin-top:4px;
+}
+.legend-color {
+  width:14px;
+  height:14px;
+  margin-right:6px;
+  border:1px solid #000;
+}
+</style>
+</head>
+
+<body>
+
+<!-- CONTROLS -->
+<div id="controls">
+  <label>Upload JSON File</label>
+  <input type="file" id="fileInput" accept=".json">
+
+  <label>X Axis</label>
+  <select id="xAxis"></select>
+
+  <label>Y Axis</label>
+  <select id="yAxis"></select>
+
+  <label>Z Axis</label>
+  <select id="zAxis"></select>
+
+  <label>Color Group</label>
+  <select id="colorAxis"></select>
+
+  <label>Color Palette</label>
+  <select id="palette">
+    <option value="default">Default</option>
+    <option value="pastel">Pastel</option>
+    <option value="vivid">Vivid</option>
+    <option value="cool">Cool</option>
+    <option value="warm">Warm</option>
+    <option value="highcontrast">High Contrast</option>
+    <option value="tableau">Tableau</option>
+    <option value="neon">Neon</option>
+    <option value="grayscale">Grayscale</option>
+    <option value="colorblind">Color-Blind Safe</option>
+  </select>
+
+  <label>Graph Type</label>
+  <select id="graphType">
+    <option value="scatter">Scatter</option>
+    <option value="line">Line</option>
+    <option value="bar">Bar</option>
+    <option value="heatmap">Heatmap</option>
+    <option value="donut">Donut</option>
+  </select>
+
+  <button onclick="plot()">Plot</button>
+</div>
+
+<!-- LEGEND -->
+<div id="legend">
+  <strong>Legend</strong>
+  <div id="legendItems"></div>
+</div>
+
+<!-- SCENE -->
+<a-scene background="color:#ffffff">
+  <a-camera position="0 1.6 4"></a-camera>
+
+  <a-entity light="type:ambient; intensity:0.9"></a-entity>
+  <a-entity light="type:directional; intensity:0.8" position="3 5 4"></a-entity>
+
+  <a-grid width="4" height="4" color="#ccc" rotation="-90 0 0"></a-grid>
+
+  <!-- AXES -->
+  <a-entity id="axes">
+    <!-- X Axis -->
+    <a-entity line="start:0 0 0; end:0 0 0; color:#ff3b3b" animation="property: line.end; to:3 0 0; dur:900; easing:easeOutQuad"></a-entity>
+    <a-cone position="3.05 0 0" rotation="0 0 -90" radius-bottom="0.04" height="0.12" color="#ff3b3b"></a-cone>
+    <a-text value="X Axis" position="3.25 0.05 0" color="#ff3b3b" scale="0.6 0.6 0.6"></a-text>
+
+    <!-- Y Axis -->
+    <a-entity line="start:0 0 0; end:0 0 0; color:#2ecc71" animation="property: line.end; to:0 3 0; dur:900; delay:150; easing:easeOutQuad"></a-entity>
+    <a-cone position="0 3.05 0" radius-bottom="0.04" height="0.12" color="#2ecc71"></a-cone>
+    <a-text value="Y Axis" position="0.05 3.3 0" color="#2ecc71" scale="0.6 0.6 0.6"></a-text>
+
+    <!-- Z Axis -->
+    <a-entity line="start:0 0 0; end:0 0 0; color:#3498db" animation="property: line.end; to:0 0 3; dur:900; delay:300; easing:easeOutQuad"></a-entity>
+    <a-cone position="0 0 3.05" rotation="90 0 0" radius-bottom="0.04" height="0.12" color="#3498db"></a-cone>
+    <a-text value="Z Axis" position="0 0.05 3.3" rotation="0 -90 0" color="#3498db" scale="0.6 0.6 0.6"></a-text>
+  </a-entity>
+</a-scene>
+
+<script>
+let dataset=[];
+const AXIS_LEN = 3;
+const TICK_COUNT = 5;
+
+/* PALETTES */
+const palettes = {
+ default:["#e03131","#2f9e44","#1971c2","#f08c00","#7048e8"],
+ pastel:["#ffd6a5","#caffbf","#9bf6ff","#bdb2ff","#ffc6ff"],
+ vivid:["#ff0000","#00ff00","#0000ff","#ff9900","#9900ff"],
+ cool:["#0b7285","#1971c2","#364fc7","#5f3dc4","#087f5b"],
+ warm:["#7f1d1d","#b91c1c","#ef4444","#f97316","#facc15"],
+ highcontrast:["#000","#f00","#0f0","#00f","#f0f"],
+ tableau:["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f"],
+ neon:["#39ff14","#ff073a","#00e5ff","#ffea00","#ff6ec7"],
+ grayscale:["#111","#333","#555","#777","#999"],
+ colorblind:["#000","#E69F00","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00"]
+};
+
+/* LOAD FILE */
+fileInput.onchange = e => {
+ const r = new FileReader();
+ r.onload = ev => {
+  dataset = JSON.parse(ev.target.result);
+
+  // Convert numeric columns to numbers
+  dataset = dataset.map(d => {
+   let newD = {};
+   Object.keys(d).forEach(k => {
+    const n = +d[k];
+    newD[k] = isNaN(n) ? d[k] : n;
+   });
+   return newD;
+  });
+
+  initUI(dataset);
+ };
+ r.readAsText(e.target.files[0]);
+};
+
+function initUI(d){
+ const cols = Object.keys(d[0]);
+ const nums = cols.filter(c => typeof d[0][c] === "number");
+ fill(xAxis, nums);
+ fill(yAxis, nums);
+ fill(zAxis, nums);
+ fill(colorAxis, cols);
+}
+
+function fill(s,a){
+ s.innerHTML="";
+ a.forEach(v => s.add(new Option(v,v)));
+}
+
+/* AXIS TICKS */
+function clearAxisTicks(){ document.querySelectorAll(".axisTick,.axisLabel").forEach(e=>e.remove()); }
+
+function drawAxisTicks(mx,my,mz){
+ clearAxisTicks();
+ const axes=document.getElementById("axes");
+ for(let i=0;i<=TICK_COUNT;i++){
+  const t=i/TICK_COUNT;
+  createTick(axes,`${AXIS_LEN*t} 0 0`,`${AXIS_LEN*t} -0.05 0`,`${(mx*t).toFixed(1)}`,`${AXIS_LEN*t} -0.18 0`);
+  createTick(axes,`0 ${AXIS_LEN*t} 0`,`-0.05 ${AXIS_LEN*t} 0`,`${(my*t).toFixed(1)}`,`-0.25 ${AXIS_LEN*t} 0`);
+  createTick(axes,`0 0 ${AXIS_LEN*t}`,`0 -0.05 ${AXIS_LEN*t}`,`${(mz*t).toFixed(1)}`,`0 -0.18 ${AXIS_LEN*t}`,"0 -90 0");
+ }
+}
+
+function createTick(parent,start,end,label,labelPos,rot="0 0 0"){
+ const tick=document.createElement("a-entity");
+ tick.className="axisTick";
+ tick.setAttribute("line",`start:${start}; end:${end}; color:#444`);
+ parent.appendChild(tick);
+
+ const text=document.createElement("a-text");
+ text.className="axisLabel";
+ text.setAttribute("value",label);
+ text.setAttribute("position",labelPos);
+ text.setAttribute("rotation",rot);
+ text.setAttribute("color","#000");
+ text.setAttribute("scale","0.4 0.4 0.4");
+ parent.appendChild(text);
+}
+
+/* LEGENDS */
+function categoryLegend(map){
+ legendItems.innerHTML="";
+ Object.entries(map).forEach(([k,v])=>{
+  legendItems.innerHTML+=`<div class="legend-row"><div class="legend-color" style="background:${v}"></div>${k}</div>`;
+ });
+}
+
+function heatLegend(pal){
+ legendItems.innerHTML="";
+ pal.forEach((c,i)=>{
+  legendItems.innerHTML+=`<div class="legend-row"><div class="legend-color" style="background:${c}"></div>${i===0?"Low":i===pal.length-1?"High":"Medium"}</div>`;
+ });
+}
+
+/* PLOT FUNCTION */
+function plot(){
+ const axes = document.getElementById("axes");
+ axes.setAttribute("visible", graphType.value !== "donut");
+
+ // Remove previous plots
+ document.querySelectorAll(".point,.bar,.lineSeg,.heat,.donutSlice,.donutElement").forEach(e=>e.remove());
+
+ const x=xAxis.value, y=yAxis.value, z=zAxis.value, c=colorAxis.value;
+ const pal=palettes[palette.value];
+ const scene=document.querySelector("a-scene");
+
+ const safeMax = k => Math.max(...dataset.map(d=>+d[k]||0))||1;
+ const mx = safeMax(x), my = safeMax(y), mz = safeMax(z);
+
+ drawAxisTicks(mx,my,mz);
+
+ const norm = d => ({ x:(d[x]/mx)*AXIS_LEN, y:(d[y]/my)*AXIS_LEN, z:(d[z]/mz)*AXIS_LEN });
+
+ let colorMap={},idx=0;
+ if(graphType.value!=="heatmap" && graphType.value!=="donut"){
+  dataset.forEach(d=>{ if(!colorMap[d[c]]) colorMap[d[c]]=pal[idx++%pal.length]; });
+  categoryLegend(colorMap);
+ }
+
+ // Scatter and Line
+ if(graphType.value==="scatter" || graphType.value==="line"){
+  let prev=null;
+  dataset.forEach((d,i)=>{
+   const p=norm(d);
+
+   const point=document.createElement("a-sphere");
+   point.className="point";
+   point.setAttribute("position",`${p.x} ${p.y} ${p.z}`);
+   point.setAttribute("radius",0.05);
+   point.setAttribute("color",colorMap[d[c]]);
+   scene.appendChild(point);
+
+   if(graphType.value==="line" && prev){
+    const line=document.createElement("a-entity");
+    line.className="lineSeg";
+    line.setAttribute("line",`start:${prev.x} ${prev.y} ${prev.z}; end:${p.x} ${p.y} ${p.z}; color:${colorMap[d[c]]}`);
+    scene.appendChild(line);
+   }
+   prev=p;
+  });
+}
+
+// Bar
+if(graphType.value==="bar"){
+  dataset.forEach(d=>{
+   const p=norm(d);
+   const bar=document.createElement("a-box");
+   bar.className="bar";
+   bar.setAttribute("width","0.2");
+   bar.setAttribute("depth","0.2");
+   bar.setAttribute("height",p.y);
+   bar.setAttribute("position",`${p.x} ${p.y/2} ${p.z}`);
+   bar.setAttribute("color",colorMap[d[c]]);
+   scene.appendChild(bar);
+  });
+}
+
+// Heatmap
+if(graphType.value==="heatmap"){
+  heatLegend(pal);
+  dataset.forEach((d,i)=>{
+   const p=norm(d);
+   const idx=Math.floor((p.y/AXIS_LEN)*(pal.length-1));
+   const t=document.createElement("a-plane");
+   t.className="heat";
+   t.setAttribute("width","0.28");
+   t.setAttribute("height","0.28");
+   t.setAttribute("rotation","-90 0 0");
+   t.setAttribute("position",`${p.x} 0.01 ${p.z}`);
+   t.setAttribute("color",pal[idx]);
+   t.setAttribute("material","opacity:0; transparent:true");
+   t.setAttribute("animation",`property: material.opacity; to:1; dur:500; delay:${i*20}`);
+   scene.appendChild(t);
+  });
+}
+
+// Donut
+if(graphType.value==="donut"){
+  const valueKey=yAxis.value;
+  const categoryKey=colorAxis.value;
+  const values={};
+  dataset.forEach(d=>{ values[d[categoryKey]]=(values[d[categoryKey]]||0)+Number(d[valueKey]); });
+  const entries=Object.entries(values);
+  const total=entries.reduce((s,[,v])=>s+v,0);
+
+  let startAngle=0;
+  const radius=1.1, thickness=0.35, height=0.25;
+  categoryLegend(Object.fromEntries(entries.map((e,i)=>[e[0],pal[i%pal.length]])));
+
+  const center=document.createElement("a-text");
+  center.classList.add("donutElement");
+  center.setAttribute("value","0");
+  center.setAttribute("position","0 1.05 0");
+  center.setAttribute("align","center");
+  center.setAttribute("color","#000");
+  center.setAttribute("scale","0.8 0.8 0.8");
+  scene.appendChild(center);
+
+  let shown=0,step=total/60;
+  const anim=setInterval(()=>{
+   shown+=step;
+   if(shown>=total){shown=total;clearInterval(anim);}
+   center.setAttribute("value",`Total\n${shown.toFixed(0)}`);
+  },16);
+
+  entries.forEach(([label,value],i)=>{
+   const angle=(value/total)*Math.PI*2;
+   const mid=startAngle+angle/2;
+
+   const slice=document.createElement("a-cylinder");
+   slice.classList.add("donutSlice","donutElement");
+   slice.setAttribute("radius",radius);
+   slice.setAttribute("radius-inner",radius-thickness);
+   slice.setAttribute("height",0.001);
+   slice.setAttribute("theta-start",startAngle*180/Math.PI);
+   slice.setAttribute("theta-length",angle*180/Math.PI);
+   slice.setAttribute("position","0 0.5 0");
+   slice.setAttribute("color",pal[i%pal.length]);
+   slice.setAttribute("animation__grow",`property: height; to:${height}; dur:700; delay:${i*150}`);
+   scene.appendChild(slice);
+
+   const lx=Math.cos(mid)*(radius+0.45);
+   const lz=Math.sin(mid)*(radius+0.45);
+
+   const text=document.createElement("a-text");
+   text.classList.add("donutElement");
+   text.setAttribute("value",`${label}\n${value} (${((value/total)*100).toFixed(1)}%)`);
+   text.setAttribute("position",`${lx} 0.8 ${lz}`);
+   text.setAttribute("align","center");
+   text.setAttribute("color","#000");
+   text.setAttribute("scale","0.45 0.45 0.45");
+   scene.appendChild(text);
+
+   startAngle+=angle;
+  });
+}
+}
+</script>
+
+</body>
+</html>
