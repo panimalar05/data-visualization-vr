@@ -96,7 +96,16 @@ select, button, input {
 </div>
 
 <!-- SCENE -->
-<a-scene background="color:#ffffff">
+<a-scene
+  vr-mode-ui="enabled: true"
+  webxr="optionalFeatures: hand-tracking, layers"
+>
+  <a-entity laser-controls="hand: right"></a-entity>
+  <a-entity laser-controls="hand: left"></a-entity>
+
+  <a-entity hand-tracking-controls="hand: left"></a-entity>
+  <a-entity hand-tracking-controls="hand: right"></a-entity>
+
   <a-camera position="0 1.6 4"></a-camera>
 
   <a-entity light="type:ambient; intensity:0.9"></a-entity>
